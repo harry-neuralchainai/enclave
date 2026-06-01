@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/enclave-logo.svg" alt="Enclave — private legal AI, inside your boundary" width="480">
+</p>
+
 # Enclave — Self-Hosted Private Legal AI for Law Firms & In-House Teams
 
 > **Enclave is a self-hosted, private legal AI platform that runs entirely inside your own cloud (VPC) or on-premise — so your contract corpus, drafts, matter files, and client data never leave your security boundary.** AI co-counsel, contract review, due diligence, and drafting, grounded in *your* firm's documents and standards — not a public model's memory, and never used to train anyone else's model.
@@ -93,3 +97,9 @@ legal research AI · retrieval-augmented generation · RAG for legal · contract
 obligation management · legal workflow automation · AI agents for legal · law firm AI · in-house legal AI ·
 LegalTech · LegalAI · data residency · attorney-client privilege · GDPR · SOC 2 · self-hosted AI · VPC deployment ·
 bring your own model · open-source legal AI · Onyx · Paperclip.
+
+---
+
+<p align="center">
+  Powered by <a href="https://neuralchainai.com"><strong>NeuralChainAI</strong></a>
+</p>

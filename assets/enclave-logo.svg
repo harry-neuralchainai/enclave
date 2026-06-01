@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 160" width="600" height="160" role="img" aria-label="Enclave — private legal AI, inside your boundary">
+  <rect x="1" y="1" width="598" height="158" rx="18" fill="#0a0a0a" stroke="#262626" stroke-width="1.5"/>
+  <!-- Colonnade mark: two columns + lintel + base walling off a protected core -->
+  <g transform="translate(40,39) scale(1.25)" fill="none" stroke="#1a7a52" stroke-width="3.5" stroke-linecap="round">
+    <path d="M13 15 H51"/>
+    <path d="M13 50 H51"/>
+    <path d="M21 18 V47"/>
+    <path d="M43 18 V47"/>
+    <rect x="27" y="27" width="10" height="11" rx="2" fill="#1a7a52" stroke="none"/>
+  </g>
+  <text x="132" y="84" font-family="Georgia, 'Times New Roman', serif" font-size="56" fill="#fafafa">Enclave<tspan fill="#1a7a52">.</tspan></text>
+  <text x="134" y="116" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" fill="#a3a3a3">Private legal AI, inside your boundary.</text>
+</svg>
