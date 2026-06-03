@@ -61,7 +61,9 @@ services:
       - "8080:8080"
 
   ollama:
-    image: ollama/ollama:latest
+    # Pinned by digest so the bundled runtime is reproducible (see
+    # docker-compose.yml header for the version-control rationale).
+    image: ollama/ollama@sha256:99262b6b2898e1d40907883e316f31e350e0ee6316ccae6127ac5a9feeacade2
     restart: unless-stopped
     ports:
       - "11434:11434"

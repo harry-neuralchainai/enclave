@@ -20,11 +20,13 @@ Enclave gives law firms, in-house legal teams, and M&A diligence groups a **whit
 | **[Who it's for](#who-its-for)** | Target teams and use cases |
 | **[Get started](#get-started)** | Run the full stack locally or in your VPC |
 | &nbsp;&nbsp;↳ [Prerequisites](#prerequisites) | What you need installed |
-| &nbsp;&nbsp;↳ [Run the backend](#run-the-backend) | Onyx RAG + an in-VPC Ollama LLM |
+| &nbsp;&nbsp;↳ [Run the backend](#run-the-backend) | The bundled, pinned Onyx RAG + in-VPC Ollama |
 | &nbsp;&nbsp;↳ [Configure the LLM provider](#configure-the-llm-provider) | Point Onyx at your local model |
+| &nbsp;&nbsp;↳ [Run the agent layer (Paperclip)](#run-the-agent-layer-paperclip) | The bundled, pinned agent substrate |
 | &nbsp;&nbsp;↳ [Run the Enclave app](#run-the-enclave-app) | The Next.js front-end |
 | &nbsp;&nbsp;↳ [LLM runtime modes](#llm-runtime-modes) | CPU · NVIDIA GPU · native Ollama |
 | &nbsp;&nbsp;↳ [Hardware guide](#hardware-guide) | RAM/VRAM per model |
+| &nbsp;&nbsp;↳ [Pinned versions & upgrades](#pinned-versions--upgrades) | How Enclave controls bundled versions |
 | **[Preview the interface](#preview-the-interface)** | Static UI prototypes, no build step |
 | **[Keywords](#keywords)** | — |
 
@@ -112,23 +114,17 @@ Enclave is a **Next.js front-end** that talks to a self-hosted **Onyx** backend 
 
 ### Run the backend
 
-Onyx ships its own Compose stack; Enclave layers a small override on top (it publishes the API and adds an in-VPC Ollama service) plus an idempotent seed script. Both live in this repo under [`deploy/docker_compose/`](./deploy/docker_compose/).
+The Onyx stack is **bundled in this repo** under [`deploy/docker_compose/`](./deploy/docker_compose/) and **pinned by image digest** — every install runs the exact same, Enclave-controlled Onyx build (no upstream clone, no version drift). The bundle is the upstream Onyx Compose file plus a small Enclave override (publishes the API and adds an in-VPC Ollama service) and an idempotent seed script.
 
 ```bash
-# 1. Get Onyx's deployment stack
-git clone https://github.com/onyx-dot-app/onyx.git
-cd onyx/deployment/docker_compose
+# from this repo's root
+cd deploy/docker_compose
 
-# 2. Drop in Enclave's override + seed (ENCLAVE_REPO = path to this repo)
-cp "$ENCLAVE_REPO"/deploy/docker_compose/docker-compose.override.yml .
-cp "$ENCLAVE_REPO"/deploy/docker_compose/docker-compose.gpu.yml .       # optional (Linux + NVIDIA)
-cp "$ENCLAVE_REPO"/deploy/docker_compose/enclave_seed_ollama.py .
-
-# 3. Bring up the stack (CPU default; Compose auto-merges the override)
+# Bring up the pinned stack (CPU default; Compose auto-merges the override)
 docker compose up -d
 ```
 
-The override publishes the Onyx API on **:8080** and runs Ollama at `http://ollama:11434` inside the Compose network. (Container names below assume the default `onyx` Compose project.)
+That's it — no separate Onyx checkout. The override publishes the Onyx API on **:8080** and runs Ollama at `http://ollama:11434` inside the Compose network. nginx serves the Onyx admin UI on **:3001** (chosen to avoid the Enclave app on :3000). Container names below assume the default `onyx` Compose project.
 
 ### Configure the LLM provider
 
@@ -151,6 +147,23 @@ If you run Onyx with `AUTH_TYPE=disabled` (no login — the local-dev default), 
 ```bash
 docker exec onyx-cache-1 redis-cli set public:anonymous_user_enabled 1 EX 2592000
 ```
+
+### Run the agent layer (Paperclip)
+
+Paperclip — the agent-orchestration substrate behind Enclave's **Agents / Workflows** — is also **bundled and pinned** in this repo, as a standalone Compose project at [`deploy/docker_compose/docker-compose.paperclip.yml`](./deploy/docker_compose/docker-compose.paperclip.yml). It runs separately from the Onyx stack (it is *not* auto-merged), so bring it up explicitly:
+
+```bash
+# from this repo's root
+cd deploy/docker_compose
+
+# Required once: a long random secret for Paperclip's auth.
+echo "BETTER_AUTH_SECRET=$(openssl rand -hex 32)" >> .env
+
+# Start the pinned Paperclip stack (server + its own Postgres)
+docker compose -f docker-compose.paperclip.yml up -d
+```
+
+Paperclip's UI/API is served on **:3100**. The `.env` you create here is gitignored — it holds `BETTER_AUTH_SECRET` and, optionally, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` for model routing. (Deeper Onyx ↔ Paperclip wiring is on the roadmap; today it ships as a pinned, runnable bundle.)
 
 ### Run the Enclave app
 
@@ -190,6 +203,18 @@ Approximate memory the model needs, *on top of* the Onyx stack's ~6.5 GB. CPU in
 | `llama3.2:1b` | ~2 GB | Fits a stock Docker Desktop, but too weak for Onyx's agentic prompt — low-memory fallback only. |
 | `llama3.2:3b` | ~4 GB | **Default.** Usable answers; on a Mac, raise Docker Desktop memory to ~12–16 GB before selecting it. |
 | `llama3.1:8b` | ~8 GB | Recommended for real use; comfortable on a GPU or native on a 16 GB+ host. |
+
+### Pinned versions & upgrades
+
+So that every Enclave install runs the same, tested backend, the bundled stacks pin their images **by digest** rather than a floating tag like `:latest`. The digests are the single source of truth for the shipped versions and live directly in the Compose files:
+
+| Component | Where it's pinned | Bundled version |
+| --- | --- | --- |
+| Onyx (backend · web · model server · code-interpreter) | [`deploy/docker_compose/docker-compose.yml`](./deploy/docker_compose/docker-compose.yml) | Onyx 4.0.x line |
+| Ollama runtime | [`deploy/docker_compose/docker-compose.override.yml`](./deploy/docker_compose/docker-compose.override.yml) | pinned `ollama/ollama` |
+| Paperclip | [`deploy/docker_compose/docker-compose.paperclip.yml`](./deploy/docker_compose/docker-compose.paperclip.yml) | v2026.529.0 line |
+
+To upgrade a component, bump its `@sha256:…` digest in the relevant Compose file and `docker compose up -d` — there is no upstream checkout to keep in sync. Because the pin is a digest, installs are byte-for-byte reproducible regardless of how upstream tags move.
 
 ---
 

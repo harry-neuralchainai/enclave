@@ -1,0 +1,71 @@
+# =============================================================================
+# ENCLAVE — VENDORED + PINNED PAPERCLIP (agent substrate)
+# =============================================================================
+# Paperclip is the agent-orchestration/scheduling/audit layer behind Enclave's
+# Agents / Workflows. Like the Onyx stack, Enclave bundles a PINNED copy so the
+# shipped version is under Enclave's control and cannot drift.
+#
+# This is a standalone project (`name: paperclip`) — it is NOT auto-merged into
+# the Onyx stack. Run it explicitly:
+#     docker compose -f docker-compose.paperclip.yml up -d
+# Stop it with the same -f flag. Onyx's plain `docker compose up -d` ignores it.
+#
+# DELTAS FROM UPSTREAM PAPERCLIP docker/docker-compose.yml:
+#   1. Image is PINNED BY DIGEST (ghcr.io/paperclipai/paperclip) instead of a
+#      local `build:`. To upgrade Paperclip, bump the @sha256 below and commit.
+#   2. The postgres port is not published (internal to the compose network only).
+#
+# PINNED VERSION (verified pullable): v2026.529.0 line
+#   ghcr.io/paperclipai/paperclip@sha256:7b38ae47acad36f92ac9b237578f952b0b6048d84472e0a62cd0c9527304decf
+#
+# REQUIRED before first run — set in a local .env next to this file (gitignored):
+#   BETTER_AUTH_SECRET=<a long random string>   # e.g. `openssl rand -hex 32`
+# OPTIONAL model routing (leave blank to wire via your in-VPC gateway later):
+#   ANTHROPIC_API_KEY= / OPENAI_API_KEY=
+# =============================================================================
+
+name: paperclip
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: paperclip
+      POSTGRES_PASSWORD: paperclip
+      POSTGRES_DB: paperclip
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperclip -d paperclip"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  server:
+    image: ghcr.io/paperclipai/paperclip@sha256:7b38ae47acad36f92ac9b237578f952b0b6048d84472e0a62cd0c9527304decf
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${PAPERCLIP_PORT:-3100}:3100"
+    environment:
+      DATABASE_URL: postgres://paperclip:paperclip@db:5432/paperclip
+      PORT: "3100"
+      SERVE_UI: "true"
+      PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
+      PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:-http://localhost:3100}"
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+    volumes:
+      - paperclip-data:/paperclip
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  paperclip-data:
