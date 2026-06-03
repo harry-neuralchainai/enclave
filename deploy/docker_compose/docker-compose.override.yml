@@ -1,0 +1,77 @@
+# Enclave local-dev / self-host override (not part of upstream Onyx).
+# Compose merges this file automatically on top of docker-compose.yml, so a
+# plain `docker compose up -d` already includes everything below.
+#
+# It does two things:
+#   1. Publishes api_server on :8080 so the Enclave app can reach the Onyx API
+#      directly, without nginx + the Onyx web frontend (which boot-loops on the
+#      published :latest image). nginx still serves the admin UI on :3001 once
+#      the web frontend is healthy; :8080 is just a stable side door for the API.
+#   2. Adds a local Ollama service so generation runs fully in-VPC — no
+#      commercial LLM API. Onyx talks to it at http://ollama:11434 over the
+#      compose network; 11434 is also published for `ollama` CLI / host debugging.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# LLM RUNTIME — THREE WAYS TO RUN IT
+# ─────────────────────────────────────────────────────────────────────────────
+# In-stack Ollama is the DEFAULT because it ships as one `docker compose up`
+# with no host-level install and behaves identically on Linux/macOS/Windows —
+# the right trade-off for an open-source, self-hosted product. Pick a mode by
+# how the host is resourced:
+#
+#   A. In-stack, CPU only  (default — works everywhere, slowest)
+#        docker compose up -d
+#      Good for any machine without a GPU, incl. Macs. CPU inference, so keep to
+#      a small model (llama3.2:3b default; drop to :1b on tight memory).
+#
+#   B. In-stack, NVIDIA GPU  (Linux servers — the realistic VPC posture)
+#        docker compose -f docker-compose.yml \
+#                       -f docker-compose.override.yml \
+#                       -f docker-compose.gpu.yml up -d
+#      Adds GPU passthrough to the ollama service. Needs the NVIDIA Container
+#      Toolkit on the host. Fast enough for llama3.1:8b and up. (Listing files by
+#      hand disables Compose's auto-merge of this override, so it's listed too.)
+#
+#   C. Native Ollama on the host  (best on a Mac — Metal GPU, full host RAM)
+#      Docker Desktop on macOS has NO GPU passthrough and caps container memory
+#      (default ~8 GB), so in-stack is CPU-only and memory-bound there. Instead
+#      run Ollama natively (`brew install ollama && ollama serve`), delete/ignore
+#      the in-stack ollama service below, and re-seed Onyx to point at the host:
+#        docker exec -e ENCLAVE_OLLAMA_API_BASE=http://host.docker.internal:11434 \
+#          -e ENCLAVE_OLLAMA_DEFAULT_MODEL=llama3.1:8b \
+#          onyx-api_server-1 python /tmp/enclave_seed_ollama.py
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# HARDWARE GUIDE (approx. RAM/VRAM the model needs, on top of the Onyx stack's
+# ~6.5 GB; CPU inference is usable but slow, a GPU is ~10–50× faster)
+# ─────────────────────────────────────────────────────────────────────────────
+#   Model          Needs ~     Notes
+#   llama3.2:1b    ~2 GB        Fits a default Docker Desktop; too weak for
+#                              Onyx's agentic search prompt (emits garbage) —
+#                              low-memory fallback only.
+#   llama3.2:3b    ~4 GB        Default. Usable answers; raise Docker Desktop
+#                              memory to ~12–16 GB before selecting it on a Mac.
+#   llama3.1:8b    ~8 GB        Recommended for real use; comfortable on a GPU
+#                              (mode B) or native on a 16 GB+ host (mode C).
+# Switch model without editing code — the seed reads ENCLAVE_OLLAMA_MODELS /
+# ENCLAVE_OLLAMA_DEFAULT_MODEL / ENCLAVE_OLLAMA_API_BASE (see enclave_seed_ollama.py).
+services:
+  api_server:
+    ports:
+      - "8080:8080"
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ollama_data:

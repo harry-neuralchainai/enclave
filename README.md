@@ -10,6 +10,26 @@ Enclave gives law firms, in-house legal teams, and M&A diligence groups a **whit
 
 ---
 
+## Contents
+
+| Section | What's inside |
+| --- | --- |
+| **[Why self-hosted, private AI](#why-self-hosted-private-ai)** | The privacy & compliance case for in-VPC legal AI |
+| **[How it's built](#how-its-built)** | The Onyx · Paperclip · LiteLLM substrates |
+| **[Features](#features)** | What ships today, and what's on the roadmap |
+| **[Who it's for](#who-its-for)** | Target teams and use cases |
+| **[Get started](#get-started)** | Run the full stack locally or in your VPC |
+| &nbsp;&nbsp;↳ [Prerequisites](#prerequisites) | What you need installed |
+| &nbsp;&nbsp;↳ [Run the backend](#run-the-backend) | Onyx RAG + an in-VPC Ollama LLM |
+| &nbsp;&nbsp;↳ [Configure the LLM provider](#configure-the-llm-provider) | Point Onyx at your local model |
+| &nbsp;&nbsp;↳ [Run the Enclave app](#run-the-enclave-app) | The Next.js front-end |
+| &nbsp;&nbsp;↳ [LLM runtime modes](#llm-runtime-modes) | CPU · NVIDIA GPU · native Ollama |
+| &nbsp;&nbsp;↳ [Hardware guide](#hardware-guide) | RAM/VRAM per model |
+| **[Preview the interface](#preview-the-interface)** | Static UI prototypes, no build step |
+| **[Keywords](#keywords)** | — |
+
+---
+
 ## Why self-hosted, private AI
 
 Legal work is privileged, confidential, and often contractually restricted from leaving a controlled environment. Public chatbots and multi-tenant SaaS break that model. Enclave is built the other way around:
@@ -34,6 +54,11 @@ Enclave integrates two open-source substrates and wraps them in a branded, legal
 - **LiteLLM gateway** — model routing across local Ollama, BYO Bedrock/Azure, and Claude.
 
 Everything runs side-by-side **inside your VPC**, connected to the systems you already use: iManage, NetDocuments, SharePoint, network drives, S3, your CLM, and email.
+
+```
+Enclave (Next.js · :3000)  ──►  Onyx API (· :8080)  ──►  Ollama (· :11434)
+        product UI               retrieval + RAG          local LLM, in-VPC
+```
 
 ---
 
@@ -72,6 +97,99 @@ We are actively building toward:
 ## Who it's for
 
 In-house legal · M&A and transactional diligence · BigLaw · procurement and vendor management · mid-market firms — any team that needs frontier AI on confidential legal work **without** sending that work to a third party.
+
+---
+
+## Get started
+
+Enclave is a **Next.js front-end** that talks to a self-hosted **Onyx** backend (retrieval + RAG), which in turn calls a **local Ollama LLM** — so no document or prompt ever leaves your boundary. Stand up the backend first, point it at a local model, then run the app.
+
+### Prerequisites
+
+- **Docker** + **Docker Compose** — for the Onyx backend and the in-VPC Ollama service.
+- **[Bun](https://bun.sh)** ≥ 1.1 (or **Node** ≥ 20) — for the Next.js app.
+- **~16 GB RAM** recommended for a usable local model — see the [hardware guide](#hardware-guide).
+
+### Run the backend
+
+Onyx ships its own Compose stack; Enclave layers a small override on top (it publishes the API and adds an in-VPC Ollama service) plus an idempotent seed script. Both live in this repo under [`deploy/docker_compose/`](./deploy/docker_compose/).
+
+```bash
+# 1. Get Onyx's deployment stack
+git clone https://github.com/onyx-dot-app/onyx.git
+cd onyx/deployment/docker_compose
+
+# 2. Drop in Enclave's override + seed (ENCLAVE_REPO = path to this repo)
+cp "$ENCLAVE_REPO"/deploy/docker_compose/docker-compose.override.yml .
+cp "$ENCLAVE_REPO"/deploy/docker_compose/docker-compose.gpu.yml .       # optional (Linux + NVIDIA)
+cp "$ENCLAVE_REPO"/deploy/docker_compose/enclave_seed_ollama.py .
+
+# 3. Bring up the stack (CPU default; Compose auto-merges the override)
+docker compose up -d
+```
+
+The override publishes the Onyx API on **:8080** and runs Ollama at `http://ollama:11434` inside the Compose network. (Container names below assume the default `onyx` Compose project.)
+
+### Configure the LLM provider
+
+Pull a model and register it with Onyx as the default. The seed runs **inside** the `api_server` container because it writes through Onyx's DB layer:
+
+```bash
+# Pull the default model into the in-stack Ollama
+docker exec onyx-ollama-1 ollama pull llama3.2:3b
+
+# Seed Onyx's LLM provider (idempotent — safe to re-run)
+docker cp enclave_seed_ollama.py onyx-api_server-1:/tmp/enclave_seed_ollama.py
+docker exec onyx-api_server-1 python /tmp/enclave_seed_ollama.py
+```
+
+Override the model or endpoint without editing code — the seed reads these env vars:
+`ENCLAVE_OLLAMA_DEFAULT_MODEL`, `ENCLAVE_OLLAMA_MODELS`, `ENCLAVE_OLLAMA_API_BASE`.
+
+If you run Onyx with `AUTH_TYPE=disabled` (no login — the local-dev default), enable anonymous API access once so the app can reach Onyx without a key:
+
+```bash
+docker exec onyx-cache-1 redis-cli set public:anonymous_user_enabled 1 EX 2592000
+```
+
+### Run the Enclave app
+
+```bash
+# from this repo's root
+bun install
+cp .env.local.example .env.local      # then edit if your Onyx API isn't on :8080
+bun dev                               # http://localhost:3000
+```
+
+`.env.local` only needs the Onyx API base (`ONYX_API_URL`, default `http://localhost:8080`); add `ONYX_API_KEY` only if you run Onyx with auth enabled. See [`.env.local.example`](./.env.local.example).
+
+### LLM runtime modes
+
+In-stack Ollama is the default because it's one `docker compose up` with no host-level install and behaves identically on Linux, macOS, and Windows. Pick a mode by how the host is resourced:
+
+| Mode | How | Best for |
+| --- | --- | --- |
+| **CPU (default)** | `docker compose up -d` | Any machine without a GPU (incl. Macs). Slowest — keep to a small model. |
+| **NVIDIA GPU** | add `-f docker-compose.gpu.yml` (see below) | Linux servers — the realistic VPC posture. Needs the NVIDIA Container Toolkit. Fast enough for `llama3.1:8b`+. |
+| **Native Ollama** | run Ollama on the host, re-seed with `ENCLAVE_OLLAMA_API_BASE=http://host.docker.internal:11434` | macOS (Metal GPU + full host RAM) — Docker Desktop has no GPU passthrough. |
+
+The GPU overlay must be listed explicitly, which turns off Compose's auto-merge of the override — so include it too:
+
+```bash
+docker compose -f docker-compose.yml \
+               -f docker-compose.override.yml \
+               -f docker-compose.gpu.yml up -d
+```
+
+### Hardware guide
+
+Approximate memory the model needs, *on top of* the Onyx stack's ~6.5 GB. CPU inference is usable but slow; a GPU is roughly 10–50× faster.
+
+| Model | Needs ~ | Notes |
+| --- | --- | --- |
+| `llama3.2:1b` | ~2 GB | Fits a stock Docker Desktop, but too weak for Onyx's agentic prompt — low-memory fallback only. |
+| `llama3.2:3b` | ~4 GB | **Default.** Usable answers; on a Mac, raise Docker Desktop memory to ~12–16 GB before selecting it. |
+| `llama3.1:8b` | ~8 GB | Recommended for real use; comfortable on a GPU or native on a 16 GB+ host. |
 
 ---
 

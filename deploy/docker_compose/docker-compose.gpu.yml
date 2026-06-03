@@ -1,0 +1,31 @@
+# Enclave local-dev / self-host GPU overlay (not part of upstream Onyx).
+# Gives the in-stack `ollama` service access to NVIDIA GPUs so generation runs
+# at production speed. This is the realistic VPC-deployment posture: a Linux
+# host with NVIDIA drivers + the NVIDIA Container Toolkit installed.
+#
+# NOTE: GPU passthrough does NOT work on Docker Desktop for macOS (no device
+# passthrough). On a Mac, skip this overlay and either run the CPU-only in-stack
+# default or use native Ollama — see docker-compose.override.yml header.
+#
+# This is an OVERLAY, so it must be listed explicitly alongside the base file
+# and the override (listing files by hand turns off Compose's automatic merge
+# of docker-compose.override.yml, so include it too):
+#
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.override.yml \
+#     -f docker-compose.gpu.yml \
+#     up -d
+#
+# Requires: NVIDIA driver on the host + NVIDIA Container Toolkit
+# (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/).
+# Verify with: docker run --rm --gpus all ollama/ollama nvidia-smi
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
